@@ -40,17 +40,20 @@ pub fn build(imagefile: &mut Imagefile, filename: &str, tag: &str) -> bool {
         );
         let packer = execute_packer(imagefile, filename);
         print_message("creating image with packer", packer.is_ok());
-        if let Ok(mountorder) = packer {
-            for mountpoint in mountorder {
-                base_mountorder.insert(mountpoint.get_path(), mountpoint);
-            }
-            if !imagefile.configuration.mountorder_to_vec(base_mountorder) {
-                eprintln!(
-                    "{}",
-                    "no mountpoints detected, does not seem right, check and rerun building process".red()
-                );
-            }
-            return complete_build(imagefile, tag);
+        match packer {
+            Ok(mountorder) => {
+                for mountpoint in mountorder {
+                    base_mountorder.insert(mountpoint.get_path(), mountpoint);
+                }
+                if !imagefile.configuration.mountorder_to_vec(base_mountorder) {
+                    eprintln!(
+                        "{}",
+                        "no mountpoints detected, does not seem right, check and rerun building process".red()
+                    );
+                }
+                return complete_build(imagefile, tag);
+            },
+            Err(str) => { print_message(&str, false)}
         }
     }
     false
@@ -108,6 +111,9 @@ fn execute_packer(imagefile: &Imagefile, file: &str) -> Result<Vec<Mountpoint>, 
 }
 
 fn docker_packer(file: &str) -> Result<String, String> {
+    if !check_docker_daemon() {
+        return Err(String::from("check if docker is installed and running"));
+    }
     let pwd_vec = Command::new("pwd").output().unwrap().stdout;
     let pwd = str::from_utf8(&pwd_vec).unwrap().replace('\n', "");
     let current_directory = pwd;
@@ -130,6 +136,7 @@ fn docker_packer(file: &str) -> Result<String, String> {
         .spawn()
         .expect("failed to build image");
     let stdout;
+    let mut printed = false;
     loop {
         let output = Command::new("docker")
             .arg("logs")
@@ -148,13 +155,20 @@ fn docker_packer(file: &str) -> Result<String, String> {
                 eprintln!("{}", stderr)
             }
         } else {
-            eprintln!("Tried to get docker output")
+            if !printed {
+                printed = true;
+                eprintln!("Waiting for docker output")
+            }
         }
     }
     if child.wait().unwrap().success() && !stdout.is_empty() {
         return Ok(stdout);
     }
     Err("Could not execute docker command, check if docker is installed and running".to_string())
+}
+
+fn check_docker_daemon() -> bool {
+    Command::new("docker").arg("ps").output().unwrap().status.success()
 }
 
 fn native_packer(file: &str) -> Result<String, String> {

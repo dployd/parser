@@ -166,3 +166,4 @@ packer_cache
 *.zip
 *.sha256
 *.iso
+os-build
